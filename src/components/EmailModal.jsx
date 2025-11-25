@@ -49,9 +49,48 @@ export default function EmailModal({ isOpen, onClose, recipientEmail, defaultSub
             }
         } catch (error) {
             console.error('Email send error:', error);
-            const errorMessage = error.response?.data?.message || 
-                                error.message || 
-                                'Failed to send email. Please check your email configuration in backend .env file.';
+            console.error('Error details:', {
+                message: error.message,
+                code: error.code,
+                response: error.response?.data,
+                status: error.response?.status,
+                url: error.config?.url,
+                baseURL: error.config?.baseURL
+            });
+            
+            let errorMessage = 'Failed to send email.';
+            
+            // Network error - backend nuk është i aksesueshëm
+            if (error.code === 'ERR_NETWORK' || error.message.includes('Network Error') || error.message.includes('Failed to fetch')) {
+                const baseURL = error.config?.baseURL || 'unknown';
+                errorMessage = `Network error: Cannot connect to backend server. 
+                
+Current API URL: ${baseURL}
+
+${baseURL.includes('localhost') ? 
+    '⚠️ Problem: Po përdoret localhost URL në production! Vendos VITE_API_URL në Vercel Environment Variables me vlerën: https://solveylabs-backend.onrender.com' : 
+    'Kontrollo që backend-i është online dhe i aksesueshëm.'}`;
+            } 
+            // CORS error
+            else if (error.message.includes('CORS') || error.message.includes('cross-origin')) {
+                errorMessage = 'CORS error: Backend-i nuk lejon requests nga ky domain. Kontrollo CORS settings në backend.';
+            }
+            // 404 - endpoint nuk ekziston
+            else if (error.response?.status === 404) {
+                errorMessage = `Backend endpoint not found (404). Kontrollo që URL-ja e backend-it është e saktë: ${error.config?.baseURL}`;
+            }
+            // 500 - server error
+            else if (error.response?.status === 500) {
+                errorMessage = error.response?.data?.message || 'Server error (500). Kontrollo backend logs.';
+            }
+            // Të tjera
+            else if (error.response?.data?.message) {
+                errorMessage = error.response.data.message;
+            } 
+            else if (error.message) {
+                errorMessage = error.message;
+            }
+            
             setError(errorMessage);
         } finally {
             setLoading(false);
