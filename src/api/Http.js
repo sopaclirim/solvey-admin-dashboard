@@ -13,6 +13,7 @@ if (import.meta.env.PROD) {
 
 const Http = axios.create({
     baseURL,
+    timeout: 60000, // 60 sekonda timeout (email sending mund të marrë kohë)
 });
 
 // Request interceptor - shton token në header
@@ -21,10 +22,32 @@ Http.interceptors.request.use(
         const token = localStorage.getItem('sl_token');
         if (token) {
             config.headers.Authorization = `Bearer ${token}`;
+        } else {
+            console.warn('⚠️ No token found in localStorage');
         }
+        
+        // Sigurohu që Content-Type është i saktë
+        if (config.data && !config.headers['Content-Type']) {
+            config.headers['Content-Type'] = 'application/json';
+        }
+        
         // Log request për debugging
         if (import.meta.env.PROD) {
-            console.log('📤 Request:', config.method?.toUpperCase(), config.url);
+            const timestamp = new Date().toISOString();
+            console.log(`📤 [${timestamp}] Request:`, config.method?.toUpperCase(), config.url);
+            if (config.url?.includes('send-email')) {
+                console.log('📧 Email request details:', {
+                    to: config.data?.to,
+                    subject: config.data?.subject,
+                    messageLength: config.data?.message?.length,
+                    hasToken: !!token,
+                    tokenLength: token?.length,
+                    headers: {
+                        'Content-Type': config.headers['Content-Type'],
+                        'Authorization': token ? 'Bearer ***' : 'MISSING'
+                    }
+                });
+            }
         }
         return config;
     },
@@ -37,21 +60,31 @@ Http.interceptors.request.use(
 Http.interceptors.response.use(
     (response) => {
         if (import.meta.env.PROD) {
-            console.log('✅ Response:', response.config.method?.toUpperCase(), response.config.url, response.status);
+            const timestamp = new Date().toISOString();
+            console.log(`✅ [${timestamp}] Response:`, response.config.method?.toUpperCase(), response.config.url, response.status);
+            if (response.config.url?.includes('send-email')) {
+                console.log('📧 Email response:', response.data);
+            }
         }
         return response;
     },
     (error) => {
         // Log error për debugging
         if (import.meta.env.PROD) {
-            console.error('❌ API Error:', {
+            const timestamp = new Date().toISOString();
+            console.error(`❌ [${timestamp}] API Error:`, {
                 url: error.config?.url,
                 method: error.config?.method,
                 status: error.response?.status,
                 message: error.message,
                 code: error.code,
-                baseURL: error.config?.baseURL
+                baseURL: error.config?.baseURL,
+                timeout: error.code === 'ECONNABORTED' ? 'Request timeout!' : null
             });
+            
+            if (error.code === 'ECONNABORTED') {
+                console.error('⏱️ Request timeout! Backend-i po merr shumë kohë për të dërguar email.');
+            }
         }
         
         if (error.response?.status === 401) {

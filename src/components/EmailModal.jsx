@@ -33,11 +33,38 @@ export default function EmailModal({ isOpen, onClose, recipientEmail, defaultSub
         setLoading(true);
 
         try {
-            const response = await Http.post('/api/admin/send-email', {
+            console.log('📧 Starting email send request...', {
+                to: form.to.trim(),
+                subject: form.subject.trim(),
+                messageLength: form.message.trim().length
+            });
+            
+            // Sigurohu që të dhënat janë të pastra dhe të valida
+            const emailData = {
                 to: form.to.trim(),
                 subject: form.subject.trim(),
                 message: form.message.trim()
+            };
+            
+            // Validation
+            if (!emailData.to || !emailData.subject || !emailData.message) {
+                setError('Please fill in all fields');
+                setLoading(false);
+                return;
+            }
+            
+            console.log('📧 Email payload:', emailData);
+            console.log('📧 Token check:', localStorage.getItem('sl_token') ? 'Token exists' : 'NO TOKEN!');
+            
+            const startTime = Date.now();
+            const response = await Http.post('/api/admin/send-email', emailData, {
+                headers: {
+                    'Content-Type': 'application/json'
+                }
             });
+            
+            const duration = Date.now() - startTime;
+            console.log(`📧 Email send completed in ${duration}ms`, response.data);
 
             if (response.data.success) {
                 setSuccess(true);
@@ -52,16 +79,33 @@ export default function EmailModal({ isOpen, onClose, recipientEmail, defaultSub
             console.error('Error details:', {
                 message: error.message,
                 code: error.code,
-                response: error.response?.data,
                 status: error.response?.status,
+                responseData: error.response?.data,
+                responseHeaders: error.response?.headers,
                 url: error.config?.url,
                 baseURL: error.config?.baseURL
             });
             
+            // Log full error response për debugging
+            if (error.response?.data) {
+                console.error('📧 Backend error response:', JSON.stringify(error.response.data, null, 2));
+            }
+            
             let errorMessage = 'Failed to send email.';
             
+            // Timeout error
+            if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
+                errorMessage = `Request timeout: Backend-i po merr shumë kohë për të dërguar email (më shumë se 60 sekonda). 
+                
+Kjo mund të ndodhë nëse:
+- Email service (Gmail/SMTP) është i ngadaltë
+- Backend-i ka problem me email configuration
+- Network connection është e ngadaltë
+
+Provo përsëri ose kontrollo backend logs.`;
+            }
             // Network error - backend nuk është i aksesueshëm
-            if (error.code === 'ERR_NETWORK' || error.message.includes('Network Error') || error.message.includes('Failed to fetch')) {
+            else if (error.code === 'ERR_NETWORK' || error.message.includes('Network Error') || error.message.includes('Failed to fetch')) {
                 const baseURL = error.config?.baseURL || 'unknown';
                 errorMessage = `Network error: Cannot connect to backend server. 
                 
@@ -81,7 +125,16 @@ ${baseURL.includes('localhost') ?
             }
             // 500 - server error
             else if (error.response?.status === 500) {
-                errorMessage = error.response?.data?.message || 'Server error (500). Kontrollo backend logs.';
+                const backendMessage = error.response?.data?.message || error.response?.data?.error || 'Unknown server error';
+                const backendError = error.response?.data?.error || error.response?.data;
+                errorMessage = `Server error (500): ${backendMessage}
+                
+Kjo është një problem në backend, jo në frontend. Kontrollo:
+- Backend logs për detaje më specifike
+- Email service configuration (Gmail SMTP settings)
+- Backend environment variables për email
+
+Backend error details: ${JSON.stringify(backendError, null, 2)}`;
             }
             // Të tjera
             else if (error.response?.data?.message) {
